@@ -4,18 +4,23 @@
 import threading
 import time
 import queue
-exitFlag = 0
 
+# SETTINGS
+
+cargas_papel = 10
+log_console = False
 
 # BD de la Aplicación
-cargas_papel = 1
+
 casilleros = [0,0,0,0,0,0,0,0,0,0];
 papel_casilleros = [];
 for x in range(0,10):
 	papel_casilleros.append(cargas_papel)
 cola_casilleros = queue.Queue()
+cola_lavamanos = queue.Queue()
+cola_secador = queue.Queue()
 alumnos = {};
-lavamos = [0,0,0,0,0];
+lavamanos = [0,0,0,0,0];
 secador = [0,0];
 count_alumnos = 0;
 count_threads = 0;
@@ -23,16 +28,27 @@ casilleros_semaforo = threading.BoundedSemaphore();
 papel_casilleros_semaforo = threading.BoundedSemaphore();
 lavamos_semaforo = threading.BoundedSemaphore();
 secador_semaforo = threading.BoundedSemaphore();
+alumnos_file_semaforo = threading.BoundedSemaphore();
+aseo_file_semaforo = threading.BoundedSemaphore();
+alumnos_file = open("clientes.txt","w")
+aseo_file = open("personal.txt","w")
+
 
 def procesar_alumnos():
-	global alumnos, count_alumnos, count_threads
+	global alumnos, count_alumnos, count_threads, crono
 	start = count_threads
-	read = int(input("Ingrese la cantidad de Alumnos: "));
+	texto = ""
+	if(count_threads == 0):
+		texto = "Ingrese la cantidad de Alumnos: "
+	read = int(input(texto));
+	
 	while read > 25 or count_alumnos+read > 25:
 		print("La cantidad de alumnos ejecutandose no pueder ser mayor a 25. Actualmente hay "+str(count_alumnos))
 		read = int(input("Ingrese la cantidad de Alumnos: "));
 	if read == -1:
 		return False
+	if(count_threads == 0):
+		crono.start()
 	for x in range(0, read):
 		alumnos[count_threads] = Alumno(count_threads);
 		alumnos[count_threads].start();
@@ -49,7 +65,7 @@ def alumno_sale():
 class Crono (threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
-		self.time = 0;
+		self.time = -1;
 		self.pararVar = False
 	def parar(self):
 		self.pararVar = True
@@ -71,7 +87,7 @@ class Crono (threading.Thread):
 			time.sleep(1);
 class Aseo (threading.Thread):
 	def __init__(self):
-		global papel_casilleros, papel_casilleros_semaforo, cargas_papel, crono
+		global papel_casilleros, papel_casilleros_semaforo, cargas_papel, crono, log_console
 		threading.Thread.__init__(self)
 		self.papel_casilleros = papel_casilleros
 		self.papel_casilleros_semaforo = papel_casilleros_semaforo
@@ -79,11 +95,19 @@ class Aseo (threading.Thread):
 		self.cargas_papel = cargas_papel
 		self.crono = crono
 		self.pararVar = False
+		self.aseo_file = aseo_file
+		self.aseo_file_semaforo = aseo_file_semaforo
+		self.log_console = log_console
 	def parar(self):
 		self.pararVar = True
 	def log(self, text):
 		respuesta = str(self.crono.getPretty())+": Aseo "+text
-		print(respuesta);
+		
+		self.aseo_file_semaforo.acquire()
+		self.aseo_file.write(respuesta+"\n")
+		self.aseo_file_semaforo.release()
+		if self.log_console:
+			print(respuesta)
 	def reponer(self, ubicacion):
 		self.cola.put(ubicacion)
 	def run(self): # Call it with var.start();
@@ -99,23 +123,41 @@ class Aseo (threading.Thread):
 
 class Alumno (threading.Thread):
 	def __init__(self, number):
-		global casilleros, casilleros_semaforo ,lavamos_semaforo ,secador_semaforo, cola_casilleros, crono, papel_casilleros, aseo, papel_casilleros_semaforo
+		global casilleros, casilleros_semaforo ,lavamos_semaforo ,secador_semaforo, cola_casilleros, crono, papel_casilleros, aseo, papel_casilleros_semaforo, cola_lavamanos, cola_secador, lavamanos, secador, alumnos_file_semaforo, log_console
 		threading.Thread.__init__(self)
 		self.casilleros = casilleros;
+		self.lavamanos = lavamanos
+		self.secador = secador
 		self.casilleros_semaforo = casilleros_semaforo
 		self.lavamos_semaforo = lavamos_semaforo
 		self.secador_semaforo = secador_semaforo
 		self.cola_casilleros = cola_casilleros
 		self.papel_casilleros = papel_casilleros
 		self.papel_casilleros_semaforo = papel_casilleros_semaforo
-		self.step = 0;
+		self.cola_lavamanos = cola_lavamanos
+		self.cola_secador = cola_secador
 		self.number = number;
 		self.micasillero = -1;
 		self.crono = crono
 		self.aseo = aseo
+		self.alumnos_file = alumnos_file
+		self.alumnos_file_semaforo = alumnos_file_semaforo
+		self.log_console = log_console
 	def log(self, text):
 		respuesta = str(self.crono.getPretty())+": Alumno "+str(self.number+1)+" "+text
-		print(respuesta);
+
+		self.alumnos_file_semaforo.acquire()
+		self.alumnos_file.write(respuesta+"\n")
+		self.alumnos_file_semaforo.release()
+
+		if self.log_console:
+			print(respuesta)
+	def run(self): 
+		self.verificar_casillero()
+
+
+	# GESTION CASILLEROS
+
 	def entrar_casillero(self):
 		counter = 0
 		self.casilleros_semaforo.acquire()
@@ -149,8 +191,7 @@ class Alumno (threading.Thread):
 		self.casilleros_semaforo.release()
 		return False
 	def verificar_casillero(self):
-		self.step = 1;
-		self.log("Intenta entrar al casillero")	
+		# self.log("Intenta entrar al casillero")	
 		# Agregar a la cola
 		self.cola_casilleros.put(self.number);
 		while self.cola_casilleros.queue[0] != self.number:
@@ -164,17 +205,102 @@ class Alumno (threading.Thread):
 			entro = self.entrar_casillero()
 
 	def salir_casillero(self):
-		self.step = 2;
 		self.casilleros_semaforo.acquire()
 		self.casilleros[self.micasillero] = 0
 		self.log("Sale del casillero "+str(self.micasillero))
 		self.casilleros_semaforo.release()
+		self.verificar_lavamanos()
+
+
+
+
+
+	# GESTION LAVAMANOS
+
+	def entrar_lavamanos(self):
+		counter = 0
+		self.lavamos_semaforo.acquire()
+		while self.micasillero == -1 and counter < 5:
+			if(self.lavamanos[counter] == 0):
+				# Casillero Libre
+				self.log("Utiliza lavamanos " +str(counter))
+
+				self.lavamanos[counter] = 1
+				self.micasillero = counter
+				self.cola_lavamanos.get()
+				self.lavamos_semaforo.release()
+				time.sleep(5)
+				self.salir_lavamanos()
+				return True
+			counter+=1
+		self.lavamos_semaforo.release()
+		return False
+	def salir_lavamanos(self):
+		self.lavamos_semaforo.acquire()
+		self.lavamanos[self.micasillero] = 0
+		self.log("Sale del lavamano "+str(self.micasillero))
+		self.lavamos_semaforo.release()
+		self.verificar_secador()
+	def verificar_lavamanos(self):
+		self.micasillero = -1 
+		# self.log("Intenta utilizar el lavamanos")	
+		# Agregar a la cola
+		self.cola_lavamanos.put(self.number);
+		while self.cola_lavamanos.queue[0] != self.number:
+			# No somos los primeros de la cola, lo intentamos en 1 segundo
+			time.sleep(.1)
+		
+		# Somos los primeros de la cola, intentamos entrar
+		entro = self.entrar_lavamanos()
+		while not entro:
+			time.sleep(.1)
+			entro = self.entrar_lavamanos()
+
+
+	# GESTION SECADOR
+
+	def entrar_secador(self):
+		counter = 0
+		self.secador_semaforo.acquire()
+		while self.micasillero == -1 and counter < 2:
+			if(self.secador[counter] == 0):
+				# Casillero Libre
+				self.log("Utiliza secador " +str(counter))
+
+				self.secador[counter] = 1
+				self.micasillero = counter
+				self.cola_secador.get()
+				self.secador_semaforo.release()
+				time.sleep(5)
+				self.salir_secador()
+				return True
+			counter+=1
+		self.secador_semaforo.release()
+		return False
+	def salir_secador(self):
+		self.lavamos_semaforo.acquire()
+		self.secador[self.micasillero] = 0
+		self.log("Sale del secador "+str(self.micasillero))
+		self.lavamos_semaforo.release()
+		alumno_sale()
+	def verificar_secador(self):
+		self.micasillero = -1 
+		# self.log("Intenta usar secador")	
+		# Agregar a la cola
+		self.cola_secador.put(self.number);
+		while self.cola_secador.queue[0] != self.number:
+			# No somos los primeros de la cola, lo intentamos en 1 segundo
+			time.sleep(.1)
+		
+		# Somos los primeros de la cola, intentamos entrar
+		entro = self.entrar_secador()
+		while not entro:
+			time.sleep(.1)
+			entro = self.entrar_secador()
+
 
 		
-	def run(self): # Call it with var.start();
-		self.verificar_casillero()
-		alumno_sale()
-		#self.log("finaliza sus operaciones")
+	
 
 
 
@@ -184,10 +310,10 @@ aseo = Aseo();
 print("Durante la ejecución del programa podrá ingresar un número seguido de enter para agregar más alumnos, o -1 para salir.")
 
 aseo.start();
-crono.start()
 
 while procesar_alumnos():
 	continue
+
 
 
 # Wait for threads to end
@@ -199,4 +325,7 @@ crono.parar()
 
 aseo.join()
 crono.join()
-print ("Gracias por UTilizar el Programa")
+
+aseo_file.close()
+alumnos_file.close()
+print ("Gracias por Utilizar el Programa")

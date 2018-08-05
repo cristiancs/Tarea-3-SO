@@ -1,0 +1,7 @@
+[00:00]: Alumno 1 Ingresa al casillero 0
+[00:00]: Alumno 1 Utiliza casillero 0
+[00:04]: Alumno 1 Sale del casillero 0
+[00:04]: Alumno 1 Utiliza lavamanos 0
+[00:09]: Alumno 1 Sale del lavamano 0
+[00:09]: Alumno 1 Utiliza secador 0
+[00:14]: Alumno 1 Sale del secador 0
